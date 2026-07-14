@@ -4,6 +4,8 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from anthropic import Anthropic
 from ingest import load_documents, build_vector_store, chunk_text
+from typing import Optional
+import uuid
 
 load_dotenv()   # read .env file
 
@@ -14,11 +16,15 @@ client = Anthropic() # pick up ANTHROPIC_API_KEY from env
 docs = load_documents()
 collection = build_vector_store(docs)
 
+# in-memory store: conversation id -> list of {role, content} messages
+conversation_store = {}
+
 class ChatRequest(BaseModel):
     message: str
 
 class QueryRequest(BaseModel):
     question: str
+    conversation_id: Optional[str] = None
 
 class UploadRequest(BaseModel):
     source: str         # file name/label
@@ -77,28 +83,43 @@ def query(request: QueryRequest):
         raise HTTPException(status_code=404, detail="No relevant documents found") # status_code 404: nothing found
 
     retrieved_chunks = results["documents"][0]
-
-    # 2. Build a prompt that includes the retrieved context
-    # "using only the context below" is what makes answers grounded in the specific docs rather than generic Claude knowledge
     context = "\n\n".join(retrieved_chunks)
-    prompt = f"""Answer the question using only the context below. If the context doesn't contain the answer, say so.
+
+    # Get or start conversation history
+    conversation_id = request.conversation_id or str(uuid.uuid4())
+    history = conversation_store.get(conversation_id, [])
+
+    # 2. Build the current user turn, including retrieved context
+    # "using only the context below" is what makes answers grounded in the specific docs rather than generic Claude knowledge
+    user_message = f"""Answer the question using only the context below. If the context doesn't contain the answer, say so.
 
 Context:
 {context}
 
 Question: {request.question}"""
 
+    messages = history + [{"role": "user", "content": user_message}]
+
     # 3. Send to Claude
     try:
         response = client.messages.create(
             model="claude-sonnet-5",
             max_tokens=1024,
-            messages=[{"role": "user", "content": prompt}]
+            messages=messages
         )
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"LLM request failed: {str(e)}")    # status_code 502: Bad gateway, Claude failed
 
+
+    answer = response.content[0].text
+
+    # Save this turn to  history (store the raw question, not the context-stuffed version)
+    history.append({"role": "user", "content": request.question})
+    history.append({"role": "assistant", "content": answer})
+    conversation_store[conversation_id] = history
+
     return {
-        "answer": response.content[0].text,
-        "sources": [m["source"] for m in results["metadatas"][0]]
+        "answer": answer,
+        "sources": [m["source"] for m in results["metadatas"][0]],
+        "conversation_id": conversation_id
     }
