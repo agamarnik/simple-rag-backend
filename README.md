@@ -16,7 +16,7 @@ Documents persist to disk (`./chroma_db`) via ChromaDB's `PersistentClient`, so 
 
 ```bash
 # Clone the repo
-git clone git@github.com:your-username/simple-rag-backend.git
+git clone git@github.com:agamarnik/simple-rag-backend.git
 cd simple-rag-backend
 
 # Create and activate a virtual environment
