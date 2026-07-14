@@ -1,5 +1,8 @@
 from pathlib import Path
 import chromadb
+import nltk
+nltk.download('punkt_tab')  # one-time download of the sentence tokenizer model
+from nltk.tokenize import sent_tokenize
 
 # search the docs/ folder and returns every file matching *.txt
 # For each matching file, open it, read the whole thing into a string, and store it as a
@@ -13,14 +16,26 @@ def load_documents(folder="docs"):
             docs.append({"source": file_path.name, "content": f.read()})
     return docs
 
-# This slices one long string into overlapping windows.
-def chunk_text(text, chunk_size=500, overlap=50):
+# This slices one long string into overlapping sentences.
+def chunk_text(text, max_chunk_size=500, overlap_sentences=1):
+    sentences = sent_tokenize(text)     # split text into sentences
     chunks = []
-    start = 0
-    while start < len(text):
-        end = start + chunk_size
-        chunks.append(text[start:end])
-        start += chunk_size - overlap
+    current_chunk = []
+    current_lenth = 0
+
+    for sentence in sentences:
+        current_chunk.append(sentence)
+        current_lenth += len(sentence)
+
+        if current_lenth >= max_chunk_size:
+            chunks.append(" ".join(current_chunk))
+            # keep the last N sentences as overlap into the next chunk
+            current_chunk = current_chunk[-overlap_sentences:]
+            current_lenth = sum(len(s) for s in current_chunk)
+
+    if current_chunk:       # saves the final chunk
+        chunks.append(" ".join(current_chunk))
+
     return chunks
 
 def build_vector_store(docs):
