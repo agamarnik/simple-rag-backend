@@ -12,6 +12,12 @@ load_dotenv()   # read .env file
 app = FastAPI() # Initialize the application
 client = Anthropic() # pick up ANTHROPIC_API_KEY from env
 
+def extract_text(response) -> str:
+    for block in response.content:
+        if block.type == "text":
+            return block.text
+    return ""  # fallback, shouldn't normally happen
+
 # build the vector store once, when the server starts
 docs = load_documents()
 collection = build_vector_store(docs)
@@ -47,7 +53,7 @@ def chat(request: ChatRequest):
             {"role": "user", "content": request.message}
         ]
     )
-    return {"response": response.content[0].text}
+    return {"response": extract_text(response)}
 
 @app.post("/upload")
 def upload_document(request: UploadRequest):
@@ -68,29 +74,52 @@ def upload_document(request: UploadRequest):
         "chunks_added": len(chunks)
     }
 
+
+def rewrite_query(question: str, history: list) -> str:
+    if not history:
+        return question  # no history yet, nothing to resolve
+
+    # Build a compact transcript of recent turns for context
+    history_text = "\n".join([f"{m['role']}: {m['content']}" for m in history[-6:]])
+
+    rewrite_prompt = f"""Given this conversation history and a follow-up question, rewrite the follow-up question to be fully self-contained (resolve any pronouns or implicit references), without changing its meaning. Return ONLY the rewritten question, nothing else.
+
+Conversation history:
+{history_text}
+
+Follow-up question: {question}
+
+Rewritten question:"""
+
+    response = client.messages.create(
+        model="claude-sonnet-5",
+        max_tokens=100,
+        messages=[{"role": "user", "content": rewrite_prompt}]
+    )
+    return extract_text(response).strip()
+
 @app.post("/query")
 def query(request: QueryRequest):
-    if not request.question.strip():        # error handling for empty query
-        raise HTTPException(status_code=400, detail="Question cannot be empty") # status_code 400: client send something invalid
+    if not request.question.strip():
+        raise HTTPException(status_code=400, detail="Question cannot be empty")
 
-    # 1. Retrieve relevant chunks
+    conversation_id = request.conversation_id or str(uuid.uuid4())
+    history = conversation_store.get(conversation_id, [])
+
+    # Rewrite the question to be self-contained before retrieval
+    search_query = rewrite_query(request.question, history)
+
     results = collection.query(
-        query_texts=[request.question],
+        query_texts=[search_query],
         n_results=3
     )
 
     if not results["documents"][0]:
-        raise HTTPException(status_code=404, detail="No relevant documents found") # status_code 404: nothing found
+        raise HTTPException(status_code=404, detail="No relevant documents found")
 
     retrieved_chunks = results["documents"][0]
     context = "\n\n".join(retrieved_chunks)
 
-    # Get or start conversation history
-    conversation_id = request.conversation_id or str(uuid.uuid4())
-    history = conversation_store.get(conversation_id, [])
-
-    # 2. Build the current user turn, including retrieved context
-    # "using only the context below" is what makes answers grounded in the specific docs rather than generic Claude knowledge
     user_message = f"""Answer the question using only the context below. If the context doesn't contain the answer, say so.
 
 Context:
@@ -100,7 +129,6 @@ Question: {request.question}"""
 
     messages = history + [{"role": "user", "content": user_message}]
 
-    # 3. Send to Claude
     try:
         response = client.messages.create(
             model="claude-sonnet-5",
@@ -108,12 +136,10 @@ Question: {request.question}"""
             messages=messages
         )
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"LLM request failed: {str(e)}")    # status_code 502: Bad gateway, Claude failed
+        raise HTTPException(status_code=502, detail=f"LLM request failed: {str(e)}")
 
+    answer = extract_text(response)
 
-    answer = response.content[0].text
-
-    # Save this turn to  history (store the raw question, not the context-stuffed version)
     history.append({"role": "user", "content": request.question})
     history.append({"role": "assistant", "content": answer})
     conversation_store[conversation_id] = history
@@ -121,5 +147,6 @@ Question: {request.question}"""
     return {
         "answer": answer,
         "sources": [m["source"] for m in results["metadatas"][0]],
-        "conversation_id": conversation_id
+        "conversation_id": conversation_id,
+        "search_query_used": search_query  # temporary, for debugging/demoing
     }
