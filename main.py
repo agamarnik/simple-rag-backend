@@ -1,6 +1,7 @@
 import os
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, File, UploadFile
+from fastapi import FastAPI, HTTPException, File, UploadFile, Security, Depends
+from fastapi.security import APIKeyHeader
 from pypdf import PdfReader
 from pydantic import BaseModel
 from anthropic import Anthropic
@@ -12,6 +13,14 @@ load_dotenv()   # read .env file
 
 app = FastAPI() # Initialize the application
 client = Anthropic() # pick up ANTHROPIC_API_KEY from env
+api_key_header = APIKeyHeader(name="X-API-Key")
+
+def verify_api_key(api_key: str = Security(api_key_header)):
+    expected_key = os.getenv("API_SECRET_KEY")
+    if api_key != expected_key:
+        raise HTTPException(status_code=401, detail="Invalid or missing API Key")
+
+    return api_key
 
 def extract_text(response) -> str:
     for block in response.content:
@@ -57,7 +66,7 @@ def chat(request: ChatRequest):
     return {"response": extract_text(response)}
 
 @app.post("/upload")
-def upload_document(request: UploadRequest):
+def upload_document(request: UploadRequest, api_key: str = Depends(verify_api_key)):
     if not request.content.strip():     # error handling for empty doc
         raise HTTPException(status_code=400, detail="Content cannot be empty")
 
@@ -100,7 +109,7 @@ Rewritten question:"""
     return extract_text(response).strip()
 
 @app.post("/query")
-def query(request: QueryRequest):
+def query(request: QueryRequest, api_key: str = Depends(verify_api_key)):
     if not request.question.strip():
         raise HTTPException(status_code=400, detail="Question cannot be empty")
 
@@ -153,7 +162,7 @@ Question: {request.question}"""
     }
 
 @app.post("/upload-pdf")
-async def upload_pdf(file: UploadFile = File(...)):
+async def upload_pdf(file: UploadFile = File(...), api_key: str = Depends(verify_api_key)):
     if not file.filename.endswith(".pdf"):
         raise HTTPException(status_code=400, detail="File must be a PDF")
 
