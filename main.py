@@ -1,11 +1,12 @@
 import os
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, File, UploadFile
+from pypdf import PdfReader
 from pydantic import BaseModel
 from anthropic import Anthropic
 from ingest import load_documents, build_vector_store, chunk_text
 from typing import Optional
-import uuid
+import uuid, io
 
 load_dotenv()   # read .env file
 
@@ -149,4 +150,33 @@ Question: {request.question}"""
         "sources": [m["source"] for m in results["metadatas"][0]],
         "conversation_id": conversation_id,
         "search_query_used": search_query  # temporary, for debugging/demoing
+    }
+
+@app.post("/upload-pdf")
+async def upload_pdf(file: UploadFile = File(...)):
+    if not file.filename.endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="File must be a PDF")
+
+    pdf_bytes = await file.read()
+    reader = PdfReader(io.BytesIO(pdf_bytes))
+
+    text = ""
+    for page in reader.pages:
+        text += page.extract_text() + "\n"
+
+    if not text.strip():
+        raise HTTPException(status_code=400, detail="Could not extract any text from this PDF")
+
+    chunks = chunk_text(text)
+
+    for i, chunk in enumerate(chunks):
+        collection.add(
+            documents=[chunk],
+            ids=[f"{file.filename}_{i}"],
+            metadatas=[{"source": file.filename}]
+        )
+
+    return {
+        "message": f"Uploaded {file.filename}",
+        "chunks_added": len(chunks)
     }
