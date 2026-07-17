@@ -125,6 +125,7 @@ Health check endpoint (no auth required).
 ## Known limitations / possible next steps
 
 - Conversation history is stored in-memory and resets on server restart — a production version would use Redis or a database
+- Re-uploading a document with the same `source` name overwrites existing chunks at matching indices rather than replacing or versioning the document cleanly — no duplicate-source detection yet
 - No support for concurrent requests modifying the same conversation safely
 - Chunk size/overlap are fixed constants rather than configurable per-document
 - Could swap in a dedicated embedding model for more control over retrieval quality

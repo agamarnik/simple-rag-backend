@@ -21,17 +21,17 @@ def chunk_text(text, max_chunk_size=500, overlap_sentences=1):
     sentences = sent_tokenize(text)     # split text into sentences
     chunks = []
     current_chunk = []
-    current_lenth = 0
+    current_length = 0
 
     for sentence in sentences:
         current_chunk.append(sentence)
-        current_lenth += len(sentence)
+        current_length += len(sentence)
 
-        if current_lenth >= max_chunk_size:
+        if current_length >= max_chunk_size:
             chunks.append(" ".join(current_chunk))
             # keep the last N sentences as overlap into the next chunk
             current_chunk = current_chunk[-overlap_sentences:]
-            current_lenth = sum(len(s) for s in current_chunk)
+            current_length = sum(len(s) for s in current_chunk)
 
     if current_chunk:       # saves the final chunk
         chunks.append(" ".join(current_chunk))
@@ -56,15 +56,6 @@ def build_vector_store(docs):
 
     return collection
 
-# if __name__ == "__main__":
-#     docs = load_documents()
-#     print(f"Loaded {len(docs)} documents")
-#     collection = build_vector_store(docs)
-#     print(f"Collection has {collection.count()} chunks")
-
-
-
-
 def query_collection(collection, question, n_results=3):
     results = collection.query(
         query_texts=[question],
@@ -78,7 +69,7 @@ if __name__ == "__main__":
     collection = build_vector_store(docs)
     print(f"Collection has {collection.count()} chunks")
 
-    # Test query
+    # Test query, based on existing WW2 doc
     question = "When was world war 2?"
     results = query_collection(collection, question)
 

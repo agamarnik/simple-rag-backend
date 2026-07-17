@@ -30,14 +30,18 @@ def health_check():
     return {"status": "ok"}
 
 @app.post("/chat")
-def chat(request: ChatRequest):
-    response = client.messages.create(
-        model="claude-sonnet-5",
-        max_tokens=1024, # required on every request, caps how long response can be
-        messages=[
-            {"role": "user", "content": request.message}
-        ]
-    )
+def chat(request: ChatRequest, api_key: str = Depends(verify_api_key)):
+    if not request.message.strip():
+        raise HTTPException(status_code=400, detail="Message cannot be empty")
+    try:
+        response = client.messages.create(
+            model="claude-sonnet-5",
+            max_tokens=1024,        # required on every request, caps how long response can be
+            messages=[{"role": "user", "content": request.message}]
+        )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"LLM request failed: {str(e)}")
+
     return {"response": extract_text(response)}
 
 @app.post("/upload")
@@ -109,7 +113,7 @@ Question: {request.question}"""
         "answer": answer,
         "sources": [m["source"] for m in results["metadatas"][0]],
         "conversation_id": conversation_id,
-        "search_query_used": search_query  # temporary, for debugging/demoing
+        "search_query_used": search_query  # exposed for transparency into the retrieval process, for demos
     }
 
 @app.post("/upload-pdf")
