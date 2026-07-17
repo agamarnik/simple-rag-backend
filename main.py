@@ -1,32 +1,18 @@
 import os
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, File, UploadFile, Security, Depends
-from fastapi.security import APIKeyHeader
+from fastapi import FastAPI, HTTPException, File, UploadFile, Depends
 from pypdf import PdfReader
-from pydantic import BaseModel
 from anthropic import Anthropic
 from ingest import load_documents, build_vector_store, chunk_text
-from typing import Optional
+from models import ChatRequest, QueryRequest, UploadRequest
+from auth import verify_api_key
+from retrieval import rewrite_query, extract_text
 import uuid, io
 
 load_dotenv()   # read .env file
 
 app = FastAPI() # Initialize the application
 client = Anthropic() # pick up ANTHROPIC_API_KEY from env
-api_key_header = APIKeyHeader(name="X-API-Key")
-
-def verify_api_key(api_key: str = Security(api_key_header)):
-    expected_key = os.getenv("API_SECRET_KEY")
-    if api_key != expected_key:
-        raise HTTPException(status_code=401, detail="Invalid or missing API Key")
-
-    return api_key
-
-def extract_text(response) -> str:
-    for block in response.content:
-        if block.type == "text":
-            return block.text
-    return ""  # fallback, shouldn't normally happen
 
 # build the vector store once, when the server starts
 docs = load_documents()
@@ -34,17 +20,6 @@ collection = build_vector_store(docs)
 
 # in-memory store: conversation id -> list of {role, content} messages
 conversation_store = {}
-
-class ChatRequest(BaseModel):
-    message: str
-
-class QueryRequest(BaseModel):
-    question: str
-    conversation_id: Optional[str] = None
-
-class UploadRequest(BaseModel):
-    source: str         # file name/label
-    content: str        # file content
 
 @app.get("/")
 def read_root():
@@ -84,30 +59,6 @@ def upload_document(request: UploadRequest, api_key: str = Depends(verify_api_ke
         "chunks_added": len(chunks)
     }
 
-
-def rewrite_query(question: str, history: list) -> str:
-    if not history:
-        return question  # no history yet, nothing to resolve
-
-    # Build a compact transcript of recent turns for context
-    history_text = "\n".join([f"{m['role']}: {m['content']}" for m in history[-6:]])
-
-    rewrite_prompt = f"""Given this conversation history and a follow-up question, rewrite the follow-up question to be fully self-contained (resolve any pronouns or implicit references), without changing its meaning. Return ONLY the rewritten question, nothing else.
-
-Conversation history:
-{history_text}
-
-Follow-up question: {question}
-
-Rewritten question:"""
-
-    response = client.messages.create(
-        model="claude-sonnet-5",
-        max_tokens=100,
-        messages=[{"role": "user", "content": rewrite_prompt}]
-    )
-    return extract_text(response).strip()
-
 @app.post("/query")
 def query(request: QueryRequest, api_key: str = Depends(verify_api_key)):
     if not request.question.strip():
@@ -117,7 +68,7 @@ def query(request: QueryRequest, api_key: str = Depends(verify_api_key)):
     history = conversation_store.get(conversation_id, [])
 
     # Rewrite the question to be self-contained before retrieval
-    search_query = rewrite_query(request.question, history)
+    search_query = rewrite_query(client, request.question, history)
 
     results = collection.query(
         query_texts=[search_query],
