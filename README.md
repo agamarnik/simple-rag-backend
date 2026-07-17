@@ -13,14 +13,15 @@ This project combines several pieces:
 4. **Multi-turn memory** — conversations are tracked by a `conversation_id`, with history stored server-side so Claude has full context across turns.
 5. **Grounded generation** — retrieved chunks are inserted into a prompt with an explicit instruction to answer *only* from that context, keeping answers grounded in your documents rather than the model's general knowledge.
 
-  ```Question → rewrite (if follow-up) → embed → vector search → top-k chunks
+  ```
+  Question → rewrite (if follow-up) → embed → vector search → top-k chunks
   → prompt with context + history → Claude → grounded, sourced answer
   ````
 
 Documents persist to disk (`./chroma_db`) via ChromaDB's `PersistentClient`, so the vector store survives server restarts without needing to re-embed everything.
 
 ## Project structure
-
+```
   simple-rag-backend/
   ├── main.py          # FastAPI app and route definitions
   ├── models.py         # Pydantic request models
@@ -28,7 +29,7 @@ Documents persist to disk (`./chroma_db`) via ChromaDB's `PersistentClient`, so 
   ├── retrieval.py       # Query rewriting and response parsing helpers
   ├── ingest.py          # Document loading, chunking, vector store, PDF extraction
   ├── requirements.txt
-
+```
 
 ## Setup
 
