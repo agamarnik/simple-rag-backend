@@ -59,7 +59,7 @@ def get_documents(api_key: str = Depends(verify_api_key)):
     for m in metadatas:
         docsList.append(m["source"])
 
-    unique_sources = set(docsList)
+    unique_sources = sorted(set(docsList), key=str.lower) # alphabetically sorted, unique list of docs
     return {"documents": list(unique_sources)}
 
 @app.delete("/documents/{source}")
