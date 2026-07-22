@@ -7,12 +7,20 @@ from ingest import load_documents, build_vector_store, chunk_text
 from models import ChatRequest, QueryRequest, UploadRequest
 from auth import verify_api_key
 from retrieval import rewrite_query, extract_text
+from fastapi.middleware.cors import CORSMiddleware
 import uuid, io
 
 load_dotenv()   # read .env file
 
 app = FastAPI() # Initialize the application
 client = Anthropic() # pick up ANTHROPIC_API_KEY from env
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # build the vector store once, when the server starts
 docs = load_documents()
@@ -43,6 +51,24 @@ def chat(request: ChatRequest, api_key: str = Depends(verify_api_key)):
         raise HTTPException(status_code=502, detail=f"LLM request failed: {str(e)}")
 
     return {"response": extract_text(response)}
+
+@app.get("/documents")
+def get_documents(api_key: str = Depends(verify_api_key)):
+    metadatas = collection.get()["metadatas"]
+    docsList = []
+    for m in metadatas:
+        docsList.append(m["source"])
+
+    unique_sources = set(docsList)
+    return {"documents": list(unique_sources)}
+
+@app.delete("/documents/{source}")
+def delete_document(source: str, api_key: str = Depends(verify_api_key)):
+    collection.delete(where={"source": source})
+
+    return {
+        "message": f"Deleted {source}"
+    }
 
 @app.post("/upload")
 def upload_document(request: UploadRequest, api_key: str = Depends(verify_api_key)):
