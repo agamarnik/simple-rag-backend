@@ -88,6 +88,12 @@ Upload a PDF file (multipart form data). Text is extracted, chunked, and embedde
 ### `POST /query`
 Ask a question. Supports multi-turn conversations via `conversation_id`.
 
+### `GET /documents`
+Fetch a list of all available documents, sorted alphabetically.
+
+### `DELETE /documents/{source}`
+Delete a document and all it's chunks.
+
 **Request:**
 ```json
 {
